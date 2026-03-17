@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Visible Network Simulation</title>
+<style>
+  body { font-family: 'Segoe UI', sans-serif; background:#0f172a; color: white; margin:0; text-align:center; }
+  #controls { display:flex; flex-wrap:wrap; gap:15px; justify-content:center; padding: 15px; background: #1e293b; border-bottom: 2px solid #d0ef00; }
+  label { font-weight: bold; color: #94a3b8; }
+  input { width:60px; border-radius: 4px; border: 1px solid #475569; padding: 4px; background: #0f172a; color: white; }
+  button { padding:8px 25px; border:none; border-radius:6px; background:#10b981; color:white; cursor:pointer; font-weight: bold; transition: 0.3s; }
+  button:hover { background:#059669; transform: scale(1.05); }
+  #container { display:flex; flex-wrap:wrap; justify-content:center; gap:20px; padding: 20px; }
+  canvas { border-radius:12px; background:#000; border: 2px solid #ffff00; }
+  #graphContainer { width:500px; background:#1e293b; border-radius:12px; padding:20px; border: 1px solid #334155; }
+  #stats { margin-top:15px; font-family: 'Courier New', monospace; font-size: 1.3rem; color: #f8fafc; letter-spacing: 1px; }
+</style>
+</head>
+<body>
+
+<h1>Small-World Network</h1>
+
+<div id="controls">
+  <label>Rewire: <input type="number" id="pValue" value="0.1" step="0.01"></label>
+  <label>Inf Prob: <input type="number" id="infProb" value="0.25" step="0.01"></label>
+  <button id="startBtn">START SIMULATION</button>
+  <button id="resetBtn">RESET</button>
+</div>
+
+<div id="container">
+  <canvas id="networkCanvas" width="600" height="600"></canvas>
+  <div id="graphContainer">
+    <canvas id="sirGraph"></canvas>
+    <div id="stats">S: 1024 | I: 0 | R: 0</div>
+
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+const N = 1024 // Optimal density for line visibility
+const canvas = document.getElementById('networkCanvas');
+const ctx = canvas.getContext('2d');
+let nodes=[], edges=[], step=0, interval;
+let adjList = [];
+
+
+function initNodes(){
+  nodes = [];
+  const gridSize = Math.sqrt(N);   // N should be perfect square (e.g. 1024)
+
+  const spacing = canvas.width / (gridSize + 1);
+
+  let id = 0;
+  for(let i = 0; i < gridSize; i++){
+    for(let j = 0; j < gridSize; j++){
+      nodes.push({
+        id: id++,
+        x: spacing * (j + 1),
+        y: spacing * (i + 1),
+        state: 'susceptible',
+        infectedStep: -1
+      });
+    }
+  }
+}
+
+
+function createEdges(){
+  edges = [];
+  adjList = Array.from({length: N}, () => []);
+
+  const gridSize = Math.sqrt(N);
+  const p = +document.getElementById('pValue').value;
+
+  function index(i, j){
+    return i * gridSize + j;
+  }
+
+  for(let i = 0; i < gridSize; i++){
+    for(let j = 0; j < gridSize; j++){
+      const current = index(i, j);
+
+      // Right neighbour
+      if(j + 1 < gridSize){
+        let target = index(i, j + 1);
+
+        // Rewiring (small-world effect)
+        if(Math.random() < p){
+          target = Math.floor(Math.random() * N);
+        }
+
+        edges.push({ source: current, target: target });
+        adjList[current].push(target);
+        adjList[target].push(current);
+      }
+
+      // Bottom neighbour
+      if(i + 1 < gridSize){
+        let target = index(i + 1, j);
+
+        if(Math.random() < p){
+          target = Math.floor(Math.random() * N);
+        }
+
+        edges.push({ source: current, target: target });
+        adjList[current].push(target);
+        adjList[target].push(current);
+      }
+    }
+  }
+}
+
+
+
+
+
+function draw(){
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  
+  // DARK VISIBLE LINES
+  ctx.lineWidth = 0.8;
+  ctx.strokeStyle = "rgba(148, 163, 184, 0.4)"; // Dark Grayish lines
+  ctx.beginPath();
+  edges.forEach(e => {
+    let a = nodes[e.source], b = nodes[e.target];
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+  });
+  ctx.stroke();
+
+  // NODES
+  nodes.forEach(n => {
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, n.state === 'infected' ? 5 : 3, 0, Math.PI * 2);
+    
+    if(n.state === 'susceptible') {
+      ctx.fillStyle = '#3b82f6'; // Bright Blue
+      ctx.shadowBlur = 0;
+    } else if(n.state === 'infected') {
+      ctx.fillStyle = '#ff0000'; // Pure Red
+      ctx.shadowBlur = 15;
+      ctx.shadowColor = "#ff0000";
+    } else {
+      ctx.fillStyle = '#64748b'; // Muted Gray
+      ctx.shadowBlur = 0;
+    }
+    ctx.fill();
+    ctx.shadowBlur = 0; // Reset for other nodes
+  });
+}
+
+// Chart.js Setup
+const sirChart = new Chart(document.getElementById('sirGraph').getContext('2d'), {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [
+      { label: 'Susceptible', data: [], borderColor: '#3b82f6', borderWidth: 2, pointRadius: 0 },
+      { label: 'Infected', data: [], borderColor: '#ff0000', borderWidth: 3, pointRadius: 0 },
+      { label: 'Recovered', data: [], borderColor: '#64748b', borderWidth: 2, pointRadius: 0 }
+    ]
+  },
+  options: {
+  animation: false,
+  scales: {
+    x: {
+      title: {
+        display: true,
+        text: 'Time Steps',
+        color: '#e5e7eb',
+        font: { size: 14, weight: 'bold' }
+      },
+      ticks: { color: '#94a3b8' }
+    },
+    y: {
+        beginAtZero: true,
+        max: 1024,   
+        title: {
+            display: true,
+            text: 'Number of Nodes',
+            color: '#e5e7eb',
+            font: { size: 14, weight: 'bold' }
+        },
+        ticks: { color: '#94a3b8' }
+    }
+
+  },
+  plugins: {
+    legend: {
+      labels: { color: 'white' }
+    }
+  }
+}
+
+});
+
+function updateSimulation(){
+  step++;
+  const prob = +document.getElementById('infProb').value;
+  let nextInfected = [];
+  
+  nodes.forEach(n => {
+  if(n.state === 'infected'){
+    adjList[n.id].forEach(id => {
+      const t = nodes[id];
+      if(t.state === 'susceptible' && Math.random() < prob){
+        nextInfected.push(t);
+      }
+    });
+
+    if(step - n.infectedStep >= 12){
+      n.state = 'recovered';
+    }
+  }
+});
+
+
+  nextInfected.forEach(n => { 
+    if(n.state === 'susceptible'){ 
+      n.state='infected'; 
+      n.infectedStep = step; 
+    }
+  });
+
+  draw();
+  updateStats();
+  if(step > 5 && nodes.filter(n=>n.state==='infected').length === 0) clearInterval(interval);
+}
+
+function updateStats(){
+  const s = nodes.filter(n=>n.state==='susceptible').length;
+  const i = nodes.filter(n=>n.state==='infected').length;
+  const r = nodes.filter(n=>n.state==='recovered').length;
+  document.getElementById('stats').innerText = `S: ${s} | I: ${i} | R: ${r}`;
+  sirChart.data.labels.push(step);
+  sirChart.data.datasets[0].data.push(s);
+  sirChart.data.datasets[1].data.push(i);
+  sirChart.data.datasets[2].data.push(r);
+  sirChart.update();
+}
+const startBtn = document.getElementById('startBtn');
+const resetBtn = document.getElementById('resetBtn');
+
+startBtn.onclick = () => {
+  clearInterval(interval);
+  step = 0;
+  sirChart.data.labels = []; sirChart.data.datasets.forEach(ds => ds.data = []);
+  initNodes(); createEdges();
+  const startIdx = Math.floor(Math.random()*N);
+  nodes[startIdx].state = 'infected';
+  nodes[startIdx].infectedStep = 0;
+  interval = setInterval(updateSimulation, 80);
+};
+
+resetBtn.onclick = () => {
+  clearInterval(interval);
+  step = 0;
+  sirChart.data.labels = [];
+  sirChart.data.datasets.forEach(ds => ds.data = []);
+  initNodes();
+  draw();
+  document.getElementById('stats').innerText = `S: ${N} | I: 0 | R: 0`;
+};
+initNodes();
+createEdges();
+draw();
+
+
+</script>
+</body>
+</html>
+
+
+
+<!-- <!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Nipah Virus Simulation (WHO India Data)</title>
+
+<style>
+  body { font-family: 'Segoe UI', sans-serif; background:#0f172a; color: white; margin:0; text-align:center; }
+  #controls { display:flex; flex-wrap:wrap; gap:15px; justify-content:center; padding: 15px; background: #1e293b; border-bottom: 2px solid #d0ef00; }
+  label { font-weight: bold; color: #94a3b8; }
+  input { width:60px; border-radius: 4px; border: 1px solid #475569; padding: 4px; background: #0f172a; color: white; }
+  button { padding:8px 25px; border:none; border-radius:6px; background:#10b981; color:white; cursor:pointer; font-weight: bold; transition: 0.3s; }
+  button:hover { background:#059669; transform: scale(1.05); }
+  #container { display:flex; flex-wrap:wrap; justify-content:center; gap:20px; padding: 20px; }
+  canvas { border-radius:12px; background:#000; border: 2px solid #ffff00; }
+  #graphContainer { width:500px; background:#1e293b; border-radius:12px; padding:20px; border: 1px solid #334155; }
+  #stats { margin-top:15px; font-family: 'Courier New', monospace; font-size: 1.3rem; color: #f8fafc; letter-spacing: 1px; }
+</style>
+</head>
+
+<body>
+
+<h2>Nipah Virus Spread Simulation (India)</h2>
+
+<div id="controls">
+  <label>Rewire: <input type="number" id="pValue" value="0.1" step="0.01"></label>
+  <label>Inf Prob: <input type="number" id="infProb" value="0.25" step="0.01"></label>
+  <button id="startBtn">START SIMULATION</button>
+  <button id="resetBtn">RESET</button>
+</div>
+
+<div id="container">
+  <canvas id="networkCanvas" width="600" height="600"></canvas>
+  <div id="graphContainer">
+    <canvas id="sirGraph"></canvas>
+    <div id="stats">S: 1024 | I: 0 | R: 0</div>
+
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+// ===== WHO REAL DATA (REFERENCE) =====
+const WHO_NIPAH_INDIA_2026 = {
+  confirmedCases: 2,
+  states: ["West Bengal"],
+  source: "WHO Disease Outbreak News"
+};
+
+// ===== NETWORK =====
+const N = 1024;
+const size = 32;
+const canvas = document.getElementById("net");
+const ctx = canvas.getContext("2d");
+canvas.width = 500;
+canvas.height = 500;
+let nodes=[], edges=[], adj=[];
+let step=0, interval;
+function init(){
+  nodes=[];
+  adj=Array.from({length:N},()=>[]);
+  edges=[];
+  const gap=canvas.width/(size+1);
+  let id=0;
+
+  for(let i=0;i<size;i++){
+    for(let j=0;j<size;j++){
+      nodes.push({id,x:gap*(j+1),y:gap*(i+1),state:"S",t:0});
+      id++;
+    }
+  }
+
+  for(let i=0;i<size;i++){
+    for(let j=0;j<size;j++){
+      let cur=i*size+j;
+      if(j+1<size){ connect(cur,cur+1); }
+      if(i+1<size){ connect(cur,cur+size); }
+    }
+  }
+}
+
+function connect(a,b){
+  edges.push({a,b});
+  adj[a].push(b);
+  adj[b].push(a);
+}
+
+function draw(){
+  ctx.clearRect(0,0,500,500);
+  ctx.strokeStyle="rgba(200,200,200,0.3)";
+  edges.forEach(e=>{
+    ctx.beginPath();
+    ctx.moveTo(nodes[e.a].x,nodes[e.a].y);
+    ctx.lineTo(nodes[e.b].x,nodes[e.b].y);
+    ctx.stroke();
+  });
+  nodes.forEach(n=>{
+    ctx.beginPath();
+    ctx.arc(n.x,n.y,3,0,Math.PI*2);
+    ctx.fillStyle=n.state==="S"?"#3b82f6":n.state==="I"?"red":"gray";
+    ctx.fill();
+  });
+}
+
+// ===== CHART =====
+const chart=new Chart(document.getElementById("sirGraph"),{
+  type:"line",
+  data:{labels:[],datasets:[
+    {label:"S",data:[],borderColor:"#3b82f6"},
+    {label:"I",data:[],borderColor:"red"},
+    {label:"R",data:[],borderColor:"gray"}
+  ]},
+  options:{animation:false}
+});
+// stop spreading after few steps (realistic Nipah)
+if(step > 6){
+  p = 0;
+}
+if(interval === null) return;
+
+function update(){
+  step++;
+  let p=+infProb.value;
+  let newInf=[];
+
+  nodes.forEach(n=>{
+    if(n.state==="I"){
+      adj[n.id].forEach(i=>{
+        if(nodes[i].state==="S" && Math.random()<p){
+          newInf.push(nodes[i]);
+        }
+      });
+      if(step-n.t>8) n.state="R";
+    }
+  });
+
+  newInf.forEach(n=>{n.state="I";n.t=step;});
+
+  let S=nodes.filter(n=>n.state==="S").length;
+  let I=nodes.filter(n=>n.state==="I").length;
+  let R=nodes.filter(n=>n.state==="R").length;
+
+  stats.innerText=`S:${S}  I:${I}  R:${R}`;
+
+  chart.data.labels.push(step);
+  chart.data.datasets[0].data.push(S);
+  chart.data.datasets[1].data.push(I);
+  chart.data.datasets[2].data.push(R);
+  chart.update();
+
+  draw();
+
+  // 🔴 STOP WHEN NO INFECTION
+  if(I === 0){
+  clearInterval(interval);
+  interval = null;
+}
+
+}
+
+startBtn.onclick=()=>{
+  clearInterval(interval);
+  step=0;
+  chart.data.labels=[];
+  chart.data.datasets.forEach(d=>d.data=[]);
+
+  init();
+
+  // ✅ ONLY 2 INITIAL INFECTED (WHO DATA)
+  nodes[5].state="I";
+  nodes[100].state="I";
+
+  interval=setInterval(update,120);
+};
+
+resetBtn.onclick=()=>{
+  clearInterval(interval);
+  init();
+  draw();
+  stats.innerText="";
+};
+
+init(); 
+draw();
+connect()
+</script>
+
+</body>
+</html> -->
